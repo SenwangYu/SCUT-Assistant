@@ -15,14 +15,17 @@ import pcbnew
 #  作为kicad插件需要相对导入，独立运行需要绝对导入
 from . import pcb_assistant_utils
 from . import system_prompt
+
 # import pcb_assistant_utils
 # import system_prompt
 
 AVAILABLE_ACTIONS = {
-    "move_footprint_by_ref": pcb_assistant_utils.move_footprint_by_ref,
+    "move_footprint": pcb_assistant_utils.move_footprint,
     "launch_freerouting": pcb_assistant_utils.launch_freerouting,
     "place_footprint": pcb_assistant_utils.place_footprint,
-    "connect_pads_to_nets": pcb_assistant_utils.connect_pads_to_nets
+    "connect_pads_to_nets": pcb_assistant_utils.connect_pads_to_nets,
+    "query_board_footprints": pcb_assistant_utils.query_board_footprints,
+    "create_board_outline": pcb_assistant_utils.create_board_outline
 }
 
 
@@ -43,7 +46,7 @@ class DeepSeekWorker:
 
         try:
             response_stream = self.client.chat.completions.create(
-                model="deepseek/deepseek-r1-0528:free",
+                model="deepseek/deepseek-chat-v3.1:free",
                 messages=message,
                 stream=True
             )
@@ -63,13 +66,17 @@ class DeepSeekWorker:
                     if json_detected:
                         # JSON模式下只收集文本，不更新UI
                         continue
-                    else:
-                        # 非JSON模式下实时更新
-                        wx.CallAfter(self.window.update_response, text_chunk)
-                        time.sleep(0.05)  # 模拟真实打字效果
+                    # else:
+                    # 非JSON模式下实时更新
+                    # wx.CallAfter(self.window.update_response, text_chunk)
+                    # time.sleep(0.05)  # 模拟真实打字效果
 
             # 拼接完整响应
             full_response_str = ''.join(full_response)
+
+            # 保存到历史记录
+            wx.CallAfter(self.window.conversation_history.append,
+                         {"role": "assistant", "content": full_response_str})
 
             # 尝试解析并执行操作
             if not self.parse_and_execute_actions(full_response_str):
@@ -77,74 +84,125 @@ class DeepSeekWorker:
                 wx.CallAfter(self.window.append_message, "assistant",
                              "SCUT助手", full_response_str)
 
-            # 保存到历史记录
-            wx.CallAfter(self.window.conversation_history.append,
-                         {"role": "assistant", "content": full_response_str})
-
         except Exception as e:
             error_msg = f"\n\n【错误】: {str(e)}"
             wx.CallAfter(self.window.update_response, error_msg)
         finally:
             wx.CallAfter(self.window.on_request_finished)
 
+    # def parse_and_execute_actions(self, response_content):
+    #     """解析JSON结构并执行操作"""
+    #     # wx.CallAfter(self.window.append_message, "system", "执行器", "开始解析操作指令...")
+    #     ChatWindow.debug_print(self.window, response_content)
+    #     try:
+    #         # 提取可能的JSON结构
+    #         # json_match = re.search(r'(\{(?:[^{}]|(?:\{(?:[^{}]|(?:\{[^{}]*\}))*\}))*\})', response_content)
+    #         # if not json_match:
+    #         #     raise ValueError("未找到有效JSON结构")
+    #
+    #         start = response_content.find('{')
+    #         end = response_content.rfind('}')
+    #         if start == -1 or end == -1 or end < start:
+    #             raise ValueError("未找到有效JSON结构")
+    #         json_str = response_content[start:end + 1]
+    #
+    #         # ChatWindow.debug_print(self.window, json_match)
+    #
+    #         # json_str = json_match.group(0)
+    #         ChatWindow.debug_print(self.window, json_str)
+    #         action_plan = json.loads(json_str)
+    #
+    #         ChatWindow.debug_print(self.window, action_plan)
+    #
+    #         explanation = action_plan.get("explanation", "")
+    #         actions = action_plan.get("actions", [])
+    #
+    #         ChatWindow.debug_print(self.window, explanation)
+    #         ChatWindow.debug_print(self.window, actions)
+    #         wx.CallAfter(self.window.append_message, "assistant", "SCUT助手", explanation)
+    #
+    #         # 执行每个动作
+    #         for i, action in enumerate(actions):
+    #             func_name = action.get("function")
+    #             params = action.get("parameters", {})
+    #
+    #             # 分离长字符串的构建
+    #             params_str = ', '.join(f"{k}={v}" for k, v in params.items())
+    #             message = f"准备执行: {func_name}({params_str})"
+    #             wx.CallAfter(self.window.append_message, "system", "执行", message)
+    #
+    #             # 修复缩进问题
+    #             if func_name in AVAILABLE_ACTIONS:
+    #                 try:
+    #                     result = AVAILABLE_ACTIONS[func_name](**params)
+    #                     wx.CallAfter(self.window.append_message, "system", "结果",
+    #                                  f"操作成功: {func_name} 返回 {result}")
+    #                 except Exception as e:
+    #                     wx.CallAfter(self.window.append_message, "system", "错误",
+    #                                  f"执行失败: {str(e)}")
+    #             else:
+    #                 wx.CallAfter(self.window.append_message, "system", "警告",
+    #                              f"未知操作: {func_name}")
+    #
+    #         return True
+    #     except Exception as e:
+    #         wx.CallAfter(self.window.append_message, "system", "错误",
+    #                      f"解析错误: {str(e)}")
+    #         return False
+
     def parse_and_execute_actions(self, response_content):
         """解析JSON结构并执行操作"""
-        # wx.CallAfter(self.window.append_message, "system", "执行器", "开始解析操作指令...")
-        ChatWindow.debug_print(self.window, response_content)
+        # ChatWindow.debug_print(self.window, response_content)
         try:
             # 提取可能的JSON结构
-            # json_match = re.search(r'(\{(?:[^{}]|(?:\{(?:[^{}]|(?:\{[^{}]*\}))*\}))*\})', response_content)
-            # if not json_match:
-            #     raise ValueError("未找到有效JSON结构")
-
-            start = response_content.find('{')
-            end = response_content.rfind('}')
-            if start == -1 or end == -1 or end < start:
+            json_match = re.search(r'(\{(?:[^{}]|(?:\{(?:[^{}]|(?:\{[^{}]*\}))*\}))*\})', response_content)
+            if not json_match:
                 raise ValueError("未找到有效JSON结构")
-            json_str = response_content[start:end + 1]
 
-            # ChatWindow.debug_print(self.window, json_match)
-
-            # json_str = json_match.group(0)
-            ChatWindow.debug_print(self.window, json_str)
+            json_str = json_match.group(0)
             action_plan = json.loads(json_str)
-
-            ChatWindow.debug_print(self.window, action_plan)
 
             explanation = action_plan.get("explanation", "")
             actions = action_plan.get("actions", [])
 
-            ChatWindow.debug_print(self.window, explanation)
-            ChatWindow.debug_print(self.window, actions)
             wx.CallAfter(self.window.append_message, "assistant", "SCUT助手", explanation)
 
-            # 执行每个动作
-            for i, action in enumerate(actions):
+            action_feedback = []
+
+            # 执行动作
+            for action in actions:
                 func_name = action.get("function")
                 params = action.get("parameters", {})
 
-                # 分离长字符串的构建
-                params_str = ', '.join(f"{k}={v}" for k, v in params.items())
-                message = f"准备执行: {func_name}({params_str})"
-                wx.CallAfter(self.window.append_message, "system", "执行", message)
-
-                # 修复缩进问题
                 if func_name in AVAILABLE_ACTIONS:
                     try:
                         result = AVAILABLE_ACTIONS[func_name](**params)
-                        wx.CallAfter(self.window.append_message, "system", "结果",
-                                     f"操作成功: {func_name} 返回 {result}")
+                        feedback = f"{func_name} 执行成功，返回: {result}"
                     except Exception as e:
-                        wx.CallAfter(self.window.append_message, "system", "错误",
-                                     f"执行失败: {str(e)}")
+                        feedback = f"{func_name} 执行失败: {str(e)}"
                 else:
-                    wx.CallAfter(self.window.append_message, "system", "警告",
-                                 f"未知操作: {func_name}")
+                    feedback = f"未知操作: {func_name}"
 
+                wx.CallAfter(self.window.append_message, "system", "执行反馈", feedback)
+                action_feedback.append(feedback)
+
+            # === 核心改动：动作执行完后，继续交给大模型 ===
+            if action_feedback:
+                feedback_text = json.dumps(
+                    {"上次动作已执行完毕,执行结果如下，请不要重复执行上面已经执行过的动作": action_feedback},
+                    ensure_ascii=False
+                )
+                # 把动作结果交给大模型，让它决定下一步
+                wx.CallAfter(self.window.conversation_history.append,
+                             {"role": "user", "content": feedback_text})
+
+                wx.CallAfter(self.run_query, self.window.conversation_history)
+                ChatWindow.debug_print(self.window, "11111")
+            ChatWindow.debug_print(self.window, self.window.conversation_history)
             return True
+
         except Exception as e:
-            wx.CallAfter(self.window.append_message, "system", "错误",
-                         f"解析错误: {str(e)}")
+            wx.CallAfter(self.window.append_message, "system", "错误", f"解析错误: {str(e)}")
             return False
 
     def cancel(self):
@@ -208,6 +266,7 @@ class ChatWindow(wx.Frame):
         self.test_btn.Bind(wx.EVT_BUTTON, self.on_test)
         # self.debug_btn.Bind(wx.EVT_BUTTON, self.toggle_debug) # 绑定调试按钮事件
         self.message_input.Bind(wx.EVT_TEXT_ENTER, self.send_message)
+
         self.Bind(wx.EVT_CLOSE, self.on_close)
 
     def append_message(self, role, name, message):
@@ -235,12 +294,14 @@ class ChatWindow(wx.Frame):
         # 直接更新HTML字符串
         self.chat_html = self.chat_html.replace("</body>", f"{html_content}</body>")
         self.chat_display.SetPage(self.chat_html, "")
+        self.scroll_to_bottom()
+
 
         # 保存到历史记录
         if role == "user":
             self.conversation_history.append({"role": "user", "content": message})
-        elif role == "assistant":
-            self.conversation_history.append({"role": "assistant", "content": message})
+        # elif role == "assistant":
+        #     self.conversation_history.append({"role": "assistant", "content": message})
 
     def update_response(self, text_chunk):
         """实时更新流式响应"""
@@ -291,14 +352,22 @@ class ChatWindow(wx.Frame):
         self.worker_thread = None
 
     def on_test(self, event):
-        pcb_assistant_utils.connect_pads_to_nets("LED1", {'1': 'VCC', '2': 'GND'})
+        # pcb_assistant_utils.test222()
+        # pcb_assistant_utils.create_board_outline(1000, 1000, 1000, 1000)
+        self.debug_print("test_bnt")
+        pcb_assistant_utils.move_footprint("CV", 0, 0)
+        # pcb_assistant_utils.get_courtyard_by_ref("L2")
+        # pcb_assistant_utils.get_courtyard()
+        # wx.CallAfter(pcb_assistant_utils.create_board_outline, 50, 50, 100, 100)
+        # pcb_assistant_utils.connect_pads_to_nets("LED1", {'1': 'PPP', '2': 'BBB'})
+        # wx.MessageBox("BBB")
         # pcb_assistant_utils.connect_pads_to_nets("R22", {"1": "VCC", "2": "GND"})
         # pcb_assistant_utils.test()
         # pcb_assistant_utils.place_footprint("Display", "AG12864E", 100, 200, rotation_deg=0)
         # wx.MessageBox(pcb_assistant_utils.get_board_statistics())
         # print(1)
         # 先将工程文件导出为dsn,用freerouting打开后存为ses再加载
-        self.debug_print("test bnt")
+
         # freerouting_path = "D:/Kicad/9.0/share/kicad/scripting/plugins/kicad_complex_framework/freerouting/freerouting-2.1.0.jar"
         # board = pcbnew.GetBoard()
         # board_path = board.GetFileName()
@@ -357,6 +426,20 @@ class ChatWindow(wx.Frame):
 
         # 立即刷新UI（如果需要在长任务中实时显示）
         wx.YieldIfNeeded()
+
+    def scroll_to_bottom(self):
+        """将滚动条移动到底部"""
+
+        def _do_scroll(self):
+            if self.chat_display:
+                # 获取垂直滚动范围
+                scroll_range = self.chat_display.GetScrollRange(wx.VERTICAL)
+                # 设置滚动位置到底部
+                self.chat_display.Scroll(0, scroll_range)
+                # 强制刷新显示
+                self.chat_display.Refresh()
+
+        wx.CallAfter(_do_scroll, self)
 
 # if __name__ == "__main__":
 # app = wx.App()
