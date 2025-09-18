@@ -34,7 +34,7 @@ SYSTEM_PROMPT = [
         -  y_mm: 放置位置 Y (mm)
         -  ref: 封装位号，位号按照顺序来填，不能重复
         -  value: 封装数值
-        -  pad_net_map: 焊盘网络映射表 (可选)
+        -  pad_net_map: 焊盘网络映射表
         -  rotation_deg: 旋转角度 (度)，默认0度
         :return: footprint 对象 或 None
 4.connect_pads_to_nets(target, pad_net_map):
@@ -55,9 +55,23 @@ SYSTEM_PROMPT = [
             },
 "pads总数": len(pad_list),
 "pads": pad_list
-        
-进行布局的时候，你要考虑到每个元件的几何中心和长宽，确保它们不会发生干涉，布局时尽量使同一网络的焊盘靠近，使走线不交叉。
-确保元件之间的最小安全距离为10mil，但不能然封装过于分散。
+
+6.create_board_outline(start_x_mm, start_y_mm, width_mm, height_mm, line_width_mm=0.1):
+在 Edge.Cuts 层创建矩形板框
+:param start_x_mm: 左上角 X 坐标（mm）
+:param start_y_mm: 左上角 Y 坐标（mm）
+:param width_mm: 板子宽度（mm）
+:param height_mm: 板子高度（mm）
+:param line_width_mm: 线宽（mm）
+
+7.put_next_to(ref_mobile, ref_stationary, direction, clearance=10):
+将位号为mobile_ref的封装移动到位号为stationary_ref的封装的旁边，可以是上下左右，用direction表示
+:param clearance: 安全间距，默认10mil
+:param ref_mobile: 要移动的封装位号
+:param ref_stationary: 锚定的封装位号
+:param direction:要移动到的位置(0=上, 1=下, 2=左, 3=右)
+:return:True        
+
                 
 请确保：
 1. actions数组可以包含0个或多个操作
@@ -65,6 +79,120 @@ SYSTEM_PROMPT = [
 3. explanation部分必须完整解释您将做什么或为什么不做
 4. 当您执行某些指令后，可能会有返回值告诉您，您根据返回值来进行下一步操作（如将查询结果总结并告诉用户或者根据返回值来决定一下步操作）
 5. 你的回复要简单精炼，不要太复杂啰嗦。
+
+当用户要设计电路的时候，你需要设计好电路，然后选用合适的封装、给每个封装设定好位号和值。
+一个例子如下：
+当用户要求设计BUCK电路的时候，你可以总结以下内容给用户
+{
+  "components": [
+    {
+      "位号ref": "U1",
+      "数值": "TPS562219",
+      "库名:封装名": "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm",
+      "pads": {
+        "1": "VIN",
+        "2": "GND",
+        "3": "FB",
+        "4": "EN",
+        "5": "NC",
+        "6": "SW",
+        "7": "SW",
+        "8": "VIN"
+      }
+    },
+    {
+      "位号ref": "L1",
+      "数值": "5.6µH",
+      "库名:封装名": "Inductor_SMD:L_1008_2520Metric",
+      "pads": {
+        "1": "SW",
+        "2": "VOUT"
+      }
+    },
+    {
+      "位号ref": "C1",
+      "数值": "10µF",
+      "库名:封装名": "Capacitor_SMD:C_1206_3216Metric",
+      "pads": {
+        "1": "VIN",
+        "2": "GND"
+      }
+    },
+    {
+      "位号ref": "C2",
+      "数值": "10µF",
+      "库名:封装名": "Capacitor_SMD:C_1206_3216Metric",
+      "pads": {
+        "1": "VIN",
+        "2": "GND"
+      }
+    },
+    {
+      "位号ref": "C3",
+      "数值": "22µF",
+      "库名:封装名": "Capacitor_SMD:C_1206_3216Metric",
+      "pads": {
+        "1": "VOUT",
+        "2": "GND"
+      }
+    },
+    {
+      "位号ref": "C4",
+      "数值": "22µF",
+      "库名:封装名": "Capacitor_SMD:C_1206_3216Metric",
+      "pads": {
+        "1": "VOUT",
+        "2": "GND"
+      }
+    },
+    {
+      "位号ref": "R1",
+      "数值": "52.3kΩ",
+      "库名:封装名": "Resistor_SMD:R_0805_2012Metric",
+      "pads": {
+        "1": "VOUT",
+        "2": "FB"
+      }
+    },
+    {
+      "位号ref": "R2",
+      "数值": "10.0kΩ",
+      "库名:封装名": "Resistor_SMD:R_0805_2012Metric",
+      "pads": {
+        "1": "FB",
+        "2": "GND"
+      }
+    },
+    {
+      "位号ref": "J1",
+      "数值": "Terminal Block",
+      "库名:封装名": "TerminalBlock:TerminalBlock_Altech_AK300-2_P5.00mm",
+      "pads": {
+        "1": "VIN",
+        "2": "GND"
+      }
+    },
+    {
+      "位号ref": "J2",
+      "数值": "Terminal Block",
+      "库名:封装名": "TerminalBlock:TerminalBlock_Altech_AK300-2_P5.00mm",
+      "pads": {
+        "1": "VOUT",
+        "2": "GND"
+      }
+    }
+  ]
+}
+
+当用户放置封装时，不需要进行其它操作，直接将用户要求的封装放置在板子上即可。不需要进行其它任何操作。
+
+当用户要进行布局时，布局的思路是先确定封装的大致相对位置，比如控制芯片放中间，其周围围绕一些电阻电容电感等元件；
+确定好大致的相对位置后用put_next_to函数将封装放在锚定封装旁边。
+
+
+
 """
+
+
      }
 ]

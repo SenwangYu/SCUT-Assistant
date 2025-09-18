@@ -7,9 +7,10 @@ import subprocess
 import pyautogui
 
 '''
-TODO:增加
-
+TODO:增加板框绘制
+TODO:查询函数中查询库名错误
 '''
+
 
 def test():
     libname = "Resistor_SMD"
@@ -95,6 +96,8 @@ def place_footprint(lib_name, foot_print_name, x_mm, y_mm, ref, value, pad_net_m
             lib_path = dir2 + "\\footprints\\" + sub_lib_name + ".pretty"
             # wx.MessageBox(lib_path)
 
+            # sub_foot_print_name += ".kicad_mod"
+            # wx.MessageBox(lib_path + "\n" + sub_foot_print_name)
             try:
                 # 加载封装
                 footprint = pcbnew.FootprintLoad(lib_path, sub_foot_print_name)
@@ -103,6 +106,7 @@ def place_footprint(lib_name, foot_print_name, x_mm, y_mm, ref, value, pad_net_m
                 return None
 
             # 设置位置 (单位: mm)
+
             footprint.SetPosition(pcbnew.VECTOR2I(pcbnew.FromMM(sub_x_mm), pcbnew.FromMM(sub_y_mm)))
             footprint.SetOrientationDegrees(sub_rotation_deg)
 
@@ -118,11 +122,11 @@ def place_footprint(lib_name, foot_print_name, x_mm, y_mm, ref, value, pad_net_m
             pcbnew.Refresh()
 
         except Exception as e:
-            wx.MessageBox(str(e))
+            wx.MessageBox("????" + str(e))
             return None
 
-    result = wx.CallAfter(pf, lib_name, foot_print_name, x_mm, y_mm, ref, value, pad_net_map, rotation_deg)
-    return result
+    wx.CallAfter(pf, lib_name, foot_print_name, x_mm, y_mm, ref, value, pad_net_map, rotation_deg)
+    return True
 
 
 def connect_pads_to_nets(target, pad_net_map):
@@ -175,52 +179,49 @@ def query_board_footprints():
     查询当前 PCB 板子上的所有封装信息
     :return: list[dict]，每个字典包含 ref, value, footprint_name, position(mm)
     """
-    def query():
-        board = pcbnew.GetBoard()
-        result = []
-        for fp in board.GetFootprints():
-            ref = fp.GetReference()
-            value = fp.GetValue()
+    board = pcbnew.GetBoard()
+    result = []
+    for fp in board.GetFootprints():
+        ref = fp.GetReference()
+        value = fp.GetValue()
 
-            # 获取封装名
-            fp_id = fp.GetFPID()
-            if fp_id.IsValid():
-                lib_name = fp_id.GetLibNickname()
-                item_name = fp_id.GetLibItemName()
-                fp_name = f"{lib_name}:{item_name}" if lib_name else item_name
-            else:
-                fp_name = "<未链接库>"
+        # 获取封装名
+        fp_id = fp.GetFPID()
+        if fp_id.IsValid():
+            lib_name = fp_id.GetLibNickname()
+            item_name = fp_id.GetLibItemName()
+            fp_name = f"{lib_name}:{item_name}" if lib_name else item_name
+        else:
+            fp_name = "<未链接库>"
 
-            # 尺寸和几何中心
-            bbox = get_courtyard_bbox(fp)
-            center = bbox.Centre()
-            size = bbox.GetSize()
+        # 尺寸和几何中心
+        bbox = get_courtyard_bbox(fp)
+        center = bbox.Centre()
+        size = bbox.GetSize()
 
-            # 获取焊盘信息
-            pad_list = []
-            for pad in fp.Pads():
-                pad_list.append({
-                    "pad编号": pad.GetPadName(),
-                    "网络名": pad.GetNetname(),
-                    "网络号": pad.GetNet().GetNetCode() if pad.GetNet() else None
-                })
-
-            result.append({
-                "位号ref": ref,
-                "值value": value,
-                "库名:封装名": fp_name,
-                "封装x方向长度(mils)": pcbnew.ToMils(size.x),
-                "封装y方向宽度(mils)": pcbnew.ToMils(size.y),
-                "位置(几何中心)": {
-                    "x_mil": pcbnew.ToMils(center.x),
-                    "y_mil": pcbnew.ToMils(center.y)
-                },
-                "pads总数": len(pad_list),
-                "pads": pad_list
+        # 获取焊盘信息
+        pad_list = []
+        for pad in fp.Pads():
+            pad_list.append({
+                "pad编号": pad.GetPadName(),
+                "网络名": pad.GetNetname(),
+                "网络号": pad.GetNet().GetNetCode() if pad.GetNet() else None
             })
-        return result
-    info = wx.CallAfter(query)
-    return info
+
+        result.append({
+            "位号ref": ref,
+            "值value": value,
+            "库名:封装名": fp_name,
+            "封装x方向长度(mils)": pcbnew.ToMils(size.x),
+            "封装y方向宽度(mils)": pcbnew.ToMils(size.y),
+            "位置(几何中心)": {
+                "x_mil": pcbnew.ToMils(center.x),
+                "y_mil": pcbnew.ToMils(center.y)
+            },
+            "pads总数": len(pad_list),
+            "pads": pad_list
+        })
+    return result
 
 
 def create_board_outline(start_x_mm, start_y_mm, width_mm, height_mm, line_width_mm=0.1):
@@ -232,23 +233,16 @@ def create_board_outline(start_x_mm, start_y_mm, width_mm, height_mm, line_width
     :param height_mm: 板子高度（mm）
     :param line_width_mm: 线宽（mm）
     """
-
-    def _create_outline(sub_start_x_mm, sub_start_y_mm, sub_width_mm, sub_height_mm):
-        board = pcbnew.GetBoard()
-
-        # 创建一个新的线段对象
-        rect = pcbnew.PCB_SHAPE(board)
-        rect.SetShape(pcbnew.SHAPE_T_RECT)  # 设置为线段类型
-        rect.SetStart(pcbnew.VECTOR2I_MM(sub_start_x_mm, sub_start_y_mm))  # 设置左上角坐标 (毫米单位)
-        rect.SetEnd(pcbnew.VECTOR2I_MM(sub_start_x_mm + sub_width_mm, sub_start_y_mm + sub_height_mm))  # 设置终点坐标
-        rect.SetLayer(pcbnew.Edge_Cuts)  # 设置图层为 “Edge_Cuts”
-        rect.SetWidth(int(line_width_mm * pcbnew.PCB_IU_PER_MM))  # 设置线宽
-
-        board.Add(rect)  # 将线段添加到板子上
-        pcbnew.Refresh()
-
-    # 使用 wx.CallAfter 确保在主线程执行
-    wx.CallAfter(_create_outline, start_x_mm, start_y_mm, width_mm, height_mm)
+    board = pcbnew.GetBoard()
+    # 创建一个新的线段对象
+    rect = pcbnew.PCB_SHAPE(board)
+    rect.SetShape(pcbnew.SHAPE_T_RECT)  # 设置为线段类型
+    rect.SetStart(pcbnew.VECTOR2I_MM(start_x_mm, start_y_mm))  # 设置左上角坐标 (毫米单位)
+    rect.SetEnd(pcbnew.VECTOR2I_MM(start_x_mm + width_mm, start_y_mm + height_mm))  # 设置终点坐标
+    rect.SetLayer(pcbnew.Edge_Cuts)  # 设置图层为 “Edge_Cuts”
+    rect.SetWidth(int(line_width_mm * pcbnew.PCB_IU_PER_MM))  # 设置线宽
+    board.Add(rect)  # 将线段添加到板子上
+    wx.CallAfter(pcbnew.Refresh)
 
 
 def get_courtyard_by_ref(ref):
@@ -319,10 +313,10 @@ def move_footprint(ref, x_mils, y_mils):
         new_x = int(mil2mm(x_mils) * pcbnew.PCB_IU_PER_MM - offset_x)
         new_y = int(mil2mm(y_mils) * pcbnew.PCB_IU_PER_MM - offset_y)
 
-        wx.MessageBox("x:" + str(pcbnew.ToMils(center.x)) + " y:" + str(pcbnew.ToMils(center.y)) + "\n"
-                      + "Ox:" + str(pcbnew.ToMils(origin.x)) + "y:" + str(pcbnew.ToMils(origin.y)) + "\n"
-                      + "newx:" + str(pcbnew.ToMils(new_x)) + "newy:" + str(pcbnew.ToMils(new_y))
-                      )
+        # wx.MessageBox("x:" + str(pcbnew.ToMils(center.x)) + " y:" + str(pcbnew.ToMils(center.y)) + "\n"
+        #               + "Ox:" + str(pcbnew.ToMils(origin.x)) + "y:" + str(pcbnew.ToMils(origin.y)) + "\n"
+        #               + "newx:" + str(pcbnew.ToMils(new_x)) + "newy:" + str(pcbnew.ToMils(new_y))
+        #               )
 
         footprint.SetPosition(pcbnew.VECTOR2I(new_x, new_y))
         wx.CallAfter(pcbnew.Refresh)
@@ -355,3 +349,131 @@ def mil2mm(mil_value):
 def mm2mil(mm_value):
     mil_value = pcbnew.ToMils(pcbnew.FromMM(mm_value))
     return mil_value
+
+
+def put_next_to(ref_mobile, ref_stationary, direction, clearance=10, step=5, max_shift=500):
+    """
+    将位号为mobile_ref的封装移动到位号为stationary_ref的封装的旁边，可以是上下左右，用direction表示
+    :param step: 如过目标位置有碰撞发生，迭代平移直到不碰撞的步长
+    :param max_shift: 迭代平移的最大偏移量，默认
+    :param clearance: 安全间距，默认10mil
+    :param ref_mobile: 要移动的封装位号
+    :param ref_stationary: 锚定的封装位号
+    :param direction:要移动到的位置
+    :return:True
+    """
+    board = pcbnew.GetBoard()
+    # 首先获取两个封装的庭院层大小，再获取锚定封装的几何中心坐标
+    fp_mobile = board.FindFootprintByReference(ref_mobile)
+    fp_stationary = board.FindFootprintByReference(ref_stationary)
+    bbox_mobile = get_courtyard_bbox(fp_mobile)
+    bbox_stationary = get_courtyard_bbox(fp_stationary)
+    center_stationary = bbox_stationary.Centre()
+    size_mobile = bbox_mobile.GetSize()
+    size_stationary = bbox_stationary.GetSize()
+    # 待移动封装的长宽(mils) 
+    length_mobile = pcbnew.ToMils(size_mobile.x)
+    width_mobile = pcbnew.ToMils(size_mobile.y)
+
+    # 锚定封装的长宽(mils) 
+    length_stationary = pcbnew.ToMils(size_stationary.x)
+    width_stationary = pcbnew.ToMils(size_stationary.y)
+
+    # 锚定封装的几何中心
+    x_reference = pcbnew.ToMils(center_stationary.x)
+    y_reference = pcbnew.ToMils(center_stationary.y)
+
+    # 安全间距clearance
+    # 步长
+
+    # 通过direction的值来决定怎么放，0到3分别对应上下左右
+    # 初始目标位置
+    if direction == 0:  # 上
+        y_target = y_reference - (width_stationary / 2 + width_mobile / 2 + clearance)
+        x_target = x_reference
+        dx, dy = 0, -step
+    elif direction == 1:  # 下
+        y_target = y_reference + (width_stationary / 2 + width_mobile / 2 + clearance)
+        x_target = x_reference
+        dx, dy = 0, step
+    elif direction == 2:  # 左
+        x_target = x_reference - (length_stationary / 2 + length_mobile / 2 + clearance)
+        y_target = y_reference
+        dx, dy = -step, 0
+    elif direction == 3:  # 右
+        x_target = x_reference + (length_stationary / 2 + length_mobile / 2 + clearance)
+        y_target = y_reference
+        dx, dy = step, 0
+    else:
+        raise ValueError("direction 必须是 0~3 (0=上, 1=下, 2=左, 3=右)")
+
+    # 迭代平移直到不碰撞或超出范围
+
+    shift = 0
+    while shift <= max_shift:
+        if not check_collision(ref_mobile, x_target, y_target):
+            move_footprint(ref_mobile, x_target, y_target)
+            return True
+        x_target += dx
+        y_target += dy
+        shift += step
+
+    return False  # 找不到合适位置
+
+
+def check_collision(ref_mobile, x_target, y_target):
+    """
+    检测是否有碰撞
+    """
+
+    board = pcbnew.GetBoard()
+    # 获取待检测封装的上下左右边界
+    fp_check = board.FindFootprintByReference(ref_mobile)
+    bbox_check = get_courtyard_bbox(fp_check)
+    size_check = bbox_check.GetSize()
+    # 上下左右边界
+    check_left = x_target - pcbnew.ToMils(size_check.x) / 2
+    check_top = y_target - pcbnew.ToMils(size_check.y) / 2
+    check_right = x_target + pcbnew.ToMils(size_check.x) / 2
+    check_bottom = y_target + pcbnew.ToMils(size_check.y) / 2
+    # 要记录所有的封装的庭院层,遍历所有元件的位置，记录到dict中
+
+    result = []
+    for fp in board.GetFootprints():
+        if fp.GetReference() == ref_mobile:  # 跳过自己，避免自己和自己检测
+            continue
+        bbox = get_courtyard_bbox(fp)
+        center = bbox.Centre()
+        size = bbox.GetSize()
+        fp_length = pcbnew.ToMils(size.x)
+        fp_width = pcbnew.ToMils(size.y)
+        x_mil = pcbnew.ToMils(center.x)
+        y_mil = pcbnew.ToMils(center.y)
+        # 上下左右边界
+        boundary_left = x_mil - fp_length / 2
+        boundary_top = y_mil - fp_width / 2
+        boundary_right = x_mil + fp_length / 2
+        boundary_bottom = y_mil + fp_width / 2
+        result.append(
+            {
+                "ref": fp.GetReference(),
+                'top': boundary_top,
+                'bottom': boundary_bottom,
+                'left': boundary_left,
+                'right': boundary_right
+            }
+        )
+    # 满足不重叠的条件是，上边界小于下边界或左边界小于有边界或右边界小于左边界或下边界小于上边界
+
+    # 判断是否和其他元件重叠
+    for item in result:
+        # 只要不满足“不重叠”的任一条件，即重叠
+        if not (
+                check_right <= item["left"] or  # 在左边
+                check_left >= item["right"] or  # 在右边
+                check_bottom <= item["top"] or  # 在上面
+                check_top >= item["bottom"]  # 在下面
+        ):
+            # 发生碰撞
+            return True
+    return False

@@ -25,7 +25,8 @@ AVAILABLE_ACTIONS = {
     "place_footprint": pcb_assistant_utils.place_footprint,
     "connect_pads_to_nets": pcb_assistant_utils.connect_pads_to_nets,
     "query_board_footprints": pcb_assistant_utils.query_board_footprints,
-    "create_board_outline": pcb_assistant_utils.create_board_outline
+    "create_board_outline": pcb_assistant_utils.create_board_outline,
+    "put_next_to": pcb_assistant_utils.put_next_to
 }
 
 
@@ -40,7 +41,7 @@ class DeepSeekWorker:
         """修改后的处理流式请求的线程函数"""
         # 更新UI显示助手消息头
         # wx.CallAfter(self.window.append_message, "assistant", "DeepSeek 助手", "")
-
+        ChatWindow.debug_print(self.window, "进入run_query")
         full_response = []
         json_detected = False  # 检测JSON结构标志位
 
@@ -75,8 +76,9 @@ class DeepSeekWorker:
             full_response_str = ''.join(full_response)
 
             # 保存到历史记录
-            wx.CallAfter(self.window.conversation_history.append,
-                         {"role": "assistant", "content": full_response_str})
+            self.window.conversation_history.append({"role": "assistant", "content": full_response_str})
+
+            ChatWindow.debug_print(self.window, self.window.conversation_history)
 
             # 尝试解析并执行操作
             if not self.parse_and_execute_actions(full_response_str):
@@ -153,17 +155,27 @@ class DeepSeekWorker:
     def parse_and_execute_actions(self, response_content):
         """解析JSON结构并执行操作"""
         # ChatWindow.debug_print(self.window, response_content)
+        ChatWindow.debug_print(self.window, "进入parse_and_execute_actions")
         try:
             # 提取可能的JSON结构
-            json_match = re.search(r'(\{(?:[^{}]|(?:\{(?:[^{}]|(?:\{[^{}]*\}))*\}))*\})', response_content)
+            ChatWindow.debug_print(self.window, "开始提取JSON")
+
+            # json_match = re.search(r'(\{(?:[^{}]|(?:\{(?:[^{}]|(?:\{[^{}]*\}))*\}))*\})', response_content)
+            json_match = self.extract_json(response_content)
             if not json_match:
+                ChatWindow.debug_print(self.window, "未找到有效JSON结构")
                 raise ValueError("未找到有效JSON结构")
-
-            json_str = json_match.group(0)
-            action_plan = json.loads(json_str)
-
+            # extract_json() 返回的是一个 Python 字典,所以不用group也不用loads了
+            # json_str = json_match.group(0)
+            # action_plan = json.loads(json_str)
+            action_plan = json_match
             explanation = action_plan.get("explanation", "")
             actions = action_plan.get("actions", [])
+
+            # ChatWindow.debug_print(self.window, "json_str:\n" + json_str)
+            ChatWindow.debug_print(self.window, action_plan)
+            ChatWindow.debug_print(self.window, explanation)
+            ChatWindow.debug_print(self.window, actions)
 
             wx.CallAfter(self.window.append_message, "assistant", "SCUT助手", explanation)
 
@@ -171,6 +183,7 @@ class DeepSeekWorker:
 
             # 执行动作
             for action in actions:
+                ChatWindow.debug_print(self.window, "执行动作一次")
                 func_name = action.get("function")
                 params = action.get("parameters", {})
 
@@ -197,13 +210,56 @@ class DeepSeekWorker:
                              {"role": "user", "content": feedback_text})
 
                 wx.CallAfter(self.run_query, self.window.conversation_history)
-                ChatWindow.debug_print(self.window, "11111")
-            ChatWindow.debug_print(self.window, self.window.conversation_history)
+                ChatWindow.debug_print(self.window, "反馈完成一次")
+
             return True
 
         except Exception as e:
             wx.CallAfter(self.window.append_message, "system", "错误", f"解析错误: {str(e)}")
             return False
+
+    import json
+
+    def extract_json(self, response_content: str):
+        """
+        用GPT写的提取JSON的函数
+        从 response_content 中提取第一个完整 JSON 对象并返回 Python 字典
+        如果无法找到或解析，返回 None
+        """
+        start = response_content.find("{")
+        if start == -1:
+            return None  # 没有左大括号，直接返回
+
+        count = 0
+        in_string = False
+        escape = False
+        candidate = []
+
+        for ch in response_content[start:]:
+            candidate.append(ch)
+
+            # 处理字符串里的括号，避免被计数
+            if ch == '"' and not escape:
+                in_string = not in_string
+            elif ch == '\\' and not escape:
+                escape = True
+                continue
+            escape = False
+
+            if not in_string:
+                if ch == '{':
+                    count += 1
+                elif ch == '}':
+                    count -= 1
+                    if count == 0:
+                        # 找到完整 JSON 块
+                        json_str = ''.join(candidate)
+                        try:
+                            return json.loads(json_str)
+                        except json.JSONDecodeError:
+                            return None
+
+        return None  # 没有匹配成功
 
     def cancel(self):
         """取消当前请求"""
@@ -296,7 +352,6 @@ class ChatWindow(wx.Frame):
         self.chat_display.SetPage(self.chat_html, "")
         self.scroll_to_bottom()
 
-
         # 保存到历史记录
         if role == "user":
             self.conversation_history.append({"role": "user", "content": message})
@@ -355,7 +410,15 @@ class ChatWindow(wx.Frame):
         # pcb_assistant_utils.test222()
         # pcb_assistant_utils.create_board_outline(1000, 1000, 1000, 1000)
         self.debug_print("test_bnt")
-        pcb_assistant_utils.move_footprint("CV", 0, 0)
+        # pcb_assistant_utils.record_of_courtyards()
+        pcb_assistant_utils.put_next_to("C4", "R2", 0)
+        # pcb_assistant_utils.put_next_to_v2("C4", "R2", 1)
+        # pcb_assistant_utils.move_footprint("CV", 0, 0)
+        # pcb_assistant_utils.place_footprint("Inductor_SMD", "L_01005_0402Metric", 0,
+        #                                     0, "L1", "10µF",
+        #                                     {"1": "SW", "2": "VOUT"},
+        #                                     0
+        #                                     )
         # pcb_assistant_utils.get_courtyard_by_ref("L2")
         # pcb_assistant_utils.get_courtyard()
         # wx.CallAfter(pcb_assistant_utils.create_board_outline, 50, 50, 100, 100)
