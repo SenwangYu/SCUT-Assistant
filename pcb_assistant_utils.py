@@ -4,37 +4,19 @@ import pcbnew
 import wx
 import os
 import subprocess
-import pyautogui
+import time
 
 '''
-TODO:增加板框绘制
+TODO:增加板框绘制,绘制最小板框
 TODO:查询函数中查询库名错误
 '''
 
 
 def test():
-    libname = "Resistor_SMD"
+    wx.MessageBox("TEST")
     board = pcbnew.GetBoard()
-    board_path = board.GetFileName()
-    dir1 = os.path.dirname(os.path.abspath(__file__))
-    dir2 = os.path.dirname(os.path.dirname(os.path.dirname(dir1)))
-    lib_path = dir2 + "\\footprints\\" + libname + ".pretty"
-    # wx.MessageBox(lib_path)
-
-    try:
-        # 加载封装
-        footprint = pcbnew.FootprintLoad(lib_path, "R_0603_1608Metric")
-    except Exception as e:
-        print(f"放置封装失败: {str(e)}")
-        wx.MessageBox(str(e))
-        return None
-
-    # 设置位置 (单位: mm)
-    footprint.SetPosition(pcbnew.VECTOR2I(pcbnew.FromMM(50), pcbnew.FromMM(80)))
-    footprint.SetOrientationDegrees(0)
-    # 添加到 PCB
-    board.Add(footprint)
-    pcbnew.Refresh()
+    board.ClearSelected()
+    wx.CallAfter(pcbnew.Refresh)
 
 
 def move_footprint_by_ref(ref, xmils, ymils):
@@ -56,7 +38,8 @@ def launch_freerouting():
     def routing():
         current_script_dir = os.path.dirname(os.path.abspath(__file__))
         freerouting_path = os.path.join(current_script_dir, "freerouting", "freerouting-2.1.0.jar")
-        # freerouting_path = "D:/Kicad/9.0/share/kicad/scripting/plugins/kicad_complex_framework/freerouting/freerouting-2.1.0.jar"
+        # freerouting_path =
+        # "D:/Kicad/9.0/share/kicad/scripting/plugins/kicad_complex_framework/freerouting/freerouting-2.1.0.jar"
         board = pcbnew.GetBoard()
         board_path = board.GetFileName()
         base_name = os.path.splitext(board_path)[0]
@@ -224,25 +207,79 @@ def query_board_footprints():
     return result
 
 
-def create_board_outline(start_x_mm, start_y_mm, width_mm, height_mm, line_width_mm=0.1):
+def create_board_outline(start_x_mil, start_y_mil, width_mil, height_mil, line_width_mil=2):
     """
-    在 Edge.Cuts 层创建矩形板框
-    :param start_x_mm: 左上角 X 坐标（mm）
-    :param start_y_mm: 左上角 Y 坐标（mm）
-    :param width_mm: 板子宽度（mm）
-    :param height_mm: 板子高度（mm）
-    :param line_width_mm: 线宽（mm）
+    在 Edge.Cuts 层创建一个矩形板框
+    :param start_x_mil: 左上角 X 坐标（mil）
+    :param start_y_mil: 左上角 Y 坐标（mil）
+    :param width_mil: 板子宽度（mil）
+    :param height_mil: 板子高度（mil）
+    :param line_width_mil: 线宽（mil）
     """
+
     board = pcbnew.GetBoard()
     # 创建一个新的线段对象
-    rect = pcbnew.PCB_SHAPE(board)
+    rect = pcbnew.PCB_SHAPE()
     rect.SetShape(pcbnew.SHAPE_T_RECT)  # 设置为线段类型
-    rect.SetStart(pcbnew.VECTOR2I_MM(start_x_mm, start_y_mm))  # 设置左上角坐标 (毫米单位)
-    rect.SetEnd(pcbnew.VECTOR2I_MM(start_x_mm + width_mm, start_y_mm + height_mm))  # 设置终点坐标
+    rect.SetStart(pcbnew.VECTOR2I_Mils(start_x_mil, start_y_mil))  # 设置左上角坐标 (毫米单位)
+    rect.SetEnd(pcbnew.VECTOR2I_Mils(start_x_mil + width_mil, start_y_mil + height_mil))  # 设置终点坐标
+    rect.SetWidth(pcbnew.FromMils(line_width_mil))  # 设置线宽
     rect.SetLayer(pcbnew.Edge_Cuts)  # 设置图层为 “Edge_Cuts”
-    rect.SetWidth(int(line_width_mm * pcbnew.PCB_IU_PER_MM))  # 设置线宽
     board.Add(rect)  # 将线段添加到板子上
     wx.CallAfter(pcbnew.Refresh)
+
+
+def minimum_board_outline(line_width_mil=2):
+    """
+    删除目前Edge.Cuts层上的图形，并创建一个最小板框
+    :param line_width_mil:线宽，默认为2mil
+    :return:bool
+    """
+    remove_board_outline()
+
+    result = record_all_bbox()
+    # 如果没有封装，返回空值
+    if not result:
+        return False
+
+    # 使用列表推导式提取所有边界值
+    lefts = [item['left'] for item in result]
+    rights = [item['right'] for item in result]
+    tops = [item['top'] for item in result]
+    bottoms = [item['bottom'] for item in result]
+
+    # 计算最小/最大值
+    min_left = min(lefts)
+    max_right = max(rights)
+    min_top = min(tops)
+    max_bottom = max(bottoms)
+
+    create_board_outline(min_left, min_top, max_right - min_left, max_bottom - min_top, line_width_mil)
+
+    return True
+
+
+def remove_board_outline():
+    """
+    删除edge.cuts中的所有items
+    """
+    try:
+        board = pcbnew.GetBoard()
+        # board.ClearSelected()
+        # pcbnew.Refresh()
+
+        drawings_to_delete = [d for d in list(board.GetDrawings()) if d.GetLayer() == pcbnew.Edge_Cuts]
+        time.sleep(0.05) # 不加这个延时会闪退
+
+        if drawings_to_delete:
+            for d in drawings_to_delete:
+                # d.ClearSelected()
+                board.Remove(d)
+
+        wx.CallAfter(pcbnew.Refresh)
+
+    except Exception as e:
+        wx.MessageBox(f"发生异常: {str(e)}")
 
 
 def get_courtyard_by_ref(ref):
@@ -351,16 +388,17 @@ def mm2mil(mm_value):
     return mil_value
 
 
-def put_next_to(ref_mobile, ref_stationary, direction, clearance=10, step=5, max_shift=500):
+def put_next_to(ref_mobile, ref_stationary, direction, clearance=10, step=5, max_shift=500, mode=False):
     """
     将位号为mobile_ref的封装移动到位号为stationary_ref的封装的旁边，可以是上下左右，用direction表示
+    :param mode: 碰撞检测模式，mode==False表示courtyard模式（默认模式），mode==True表示boundingBox模式（会检测丝印和文本等的重叠）
     :param step: 如过目标位置有碰撞发生，迭代平移直到不碰撞的步长
     :param max_shift: 迭代平移的最大偏移量，默认
     :param clearance: 安全间距，默认10mil
     :param ref_mobile: 要移动的封装位号
     :param ref_stationary: 锚定的封装位号
     :param direction:要移动到的位置
-    :return:True
+    :return bool
     """
     board = pcbnew.GetBoard()
     # 首先获取两个封装的庭院层大小，再获取锚定封装的几何中心坐标
@@ -411,7 +449,7 @@ def put_next_to(ref_mobile, ref_stationary, direction, clearance=10, step=5, max
 
     shift = 0
     while shift <= max_shift:
-        if not check_collision(ref_mobile, x_target, y_target):
+        if not check_collision(ref_mobile, x_target, y_target, mode):
             move_footprint(ref_mobile, x_target, y_target)
             return True
         x_target += dx
@@ -421,9 +459,14 @@ def put_next_to(ref_mobile, ref_stationary, direction, clearance=10, step=5, max
     return False  # 找不到合适位置
 
 
-def check_collision(ref_mobile, x_target, y_target):
+def check_collision(ref_mobile, x_target, y_target, mode):
     """
     检测是否有碰撞
+    :param y_target: 目标y
+    :param x_target: 目标x
+    :param ref_mobile: 要移动的封装位号
+    :param mode:检测模式，mode==False表示courtyard模式，mode==True表示boundingBox模式（会检测丝印等的重叠）
+    :return bool
     """
 
     board = pcbnew.GetBoard()
@@ -438,35 +481,16 @@ def check_collision(ref_mobile, x_target, y_target):
     check_bottom = y_target + pcbnew.ToMils(size_check.y) / 2
     # 要记录所有的封装的庭院层,遍历所有元件的位置，记录到dict中
 
-    result = []
-    for fp in board.GetFootprints():
-        if fp.GetReference() == ref_mobile:  # 跳过自己，避免自己和自己检测
-            continue
-        bbox = get_courtyard_bbox(fp)
-        center = bbox.Centre()
-        size = bbox.GetSize()
-        fp_length = pcbnew.ToMils(size.x)
-        fp_width = pcbnew.ToMils(size.y)
-        x_mil = pcbnew.ToMils(center.x)
-        y_mil = pcbnew.ToMils(center.y)
-        # 上下左右边界
-        boundary_left = x_mil - fp_length / 2
-        boundary_top = y_mil - fp_width / 2
-        boundary_right = x_mil + fp_length / 2
-        boundary_bottom = y_mil + fp_width / 2
-        result.append(
-            {
-                "ref": fp.GetReference(),
-                'top': boundary_top,
-                'bottom': boundary_bottom,
-                'left': boundary_left,
-                'right': boundary_right
-            }
-        )
+    if not mode:
+        result = record_all_courtyard()
+    else:
+        result = record_all_bbox()
     # 满足不重叠的条件是，上边界小于下边界或左边界小于有边界或右边界小于左边界或下边界小于上边界
-
     # 判断是否和其他元件重叠
     for item in result:
+        # 跳过自己，避免和自己检测碰撞
+        if item["ref"] == ref_mobile:
+            continue
         # 只要不满足“不重叠”的任一条件，即重叠
         if not (
                 check_right <= item["left"] or  # 在左边
@@ -477,3 +501,65 @@ def check_collision(ref_mobile, x_target, y_target):
             # 发生碰撞
             return True
     return False
+
+
+def record_all_courtyard():
+    """
+    返回一个记录所有封装的courtyard的字典
+    """
+    board = pcbnew.GetBoard()
+    result = []
+    for fp in board.GetFootprints():
+        courtyard = get_courtyard_bbox(fp)
+        center_courtyard = courtyard.Centre()
+        size_courtyard = courtyard.GetSize()
+        courtyard_length = pcbnew.ToMils(size_courtyard.x)
+        courtyard_width = pcbnew.ToMils(size_courtyard.y)
+        x_mil = pcbnew.ToMils(center_courtyard.x)
+        y_mil = pcbnew.ToMils(center_courtyard.y)
+        # 上下左右边界
+        boundary_left = x_mil - courtyard_length / 2
+        boundary_top = y_mil - courtyard_width / 2
+        boundary_right = x_mil + courtyard_length / 2
+        boundary_bottom = y_mil + courtyard_width / 2
+        result.append(
+            {
+                "ref": fp.GetReference(),
+                'top': boundary_top,
+                'bottom': boundary_bottom,
+                'left': boundary_left,
+                'right': boundary_right
+            }
+        )
+    return result
+
+
+def record_all_bbox():
+    """
+    返回一个记录所有封装的BoundingBox的字典
+    """
+    board = pcbnew.GetBoard()
+    record_bbox = []
+    for fp in board.GetFootprints():
+        bbox = fp.GetBoundingBox()
+        center_bbox = bbox.Centre()
+        size_bbox = bbox.GetSize()
+        bbox_width = pcbnew.ToMils(size_bbox.y)
+        bbox_length = pcbnew.ToMils(size_bbox.x)
+        x_mil = pcbnew.ToMils(center_bbox.x)
+        y_mil = pcbnew.ToMils(center_bbox.y)
+        # 上下左右边界
+        boundary_left = x_mil - bbox_length / 2
+        boundary_top = y_mil - bbox_width / 2
+        boundary_right = x_mil + bbox_length / 2
+        boundary_bottom = y_mil + bbox_width / 2
+        record_bbox.append(
+            {
+                "ref": fp.GetReference(),
+                'top': boundary_top,
+                'bottom': boundary_bottom,
+                'left': boundary_left,
+                'right': boundary_right
+            }
+        )
+    return record_bbox

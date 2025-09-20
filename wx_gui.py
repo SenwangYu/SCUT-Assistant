@@ -26,7 +26,8 @@ AVAILABLE_ACTIONS = {
     "connect_pads_to_nets": pcb_assistant_utils.connect_pads_to_nets,
     "query_board_footprints": pcb_assistant_utils.query_board_footprints,
     "create_board_outline": pcb_assistant_utils.create_board_outline,
-    "put_next_to": pcb_assistant_utils.put_next_to
+    "put_next_to": pcb_assistant_utils.put_next_to,
+    "minimum_board_outline": pcb_assistant_utils.minimum_board_outline
 }
 
 
@@ -410,8 +411,10 @@ class ChatWindow(wx.Frame):
         # pcb_assistant_utils.test222()
         # pcb_assistant_utils.create_board_outline(1000, 1000, 1000, 1000)
         self.debug_print("test_bnt")
+        # pcb_assistant_utils.test()
+        pcb_assistant_utils.minimum_board_outline()
         # pcb_assistant_utils.record_of_courtyards()
-        pcb_assistant_utils.put_next_to("C4", "R2", 0)
+        # pcb_assistant_utils.put_next_to("C4", "R2", 0, 10, 5, 500, True)
         # pcb_assistant_utils.put_next_to_v2("C4", "R2", 1)
         # pcb_assistant_utils.move_footprint("CV", 0, 0)
         # pcb_assistant_utils.place_footprint("Inductor_SMD", "L_01005_0402Metric", 0,
