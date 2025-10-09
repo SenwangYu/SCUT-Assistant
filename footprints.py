@@ -27,7 +27,7 @@ def generate_footprint_summary(footprints_dir):
 
 
 if __name__ == "__main__":
-    footprints_dir = 'D://Kicad//9.0//share//kicad//footprints'  # 修改为你的实际路径
+    footprints_dir = 'D://Kicad//9.0//share//kicad//footprints'  # 修改封装路径
     summary = generate_footprint_summary(footprints_dir)
 
     # 输出JSON格式结果

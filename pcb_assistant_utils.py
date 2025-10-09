@@ -7,8 +7,21 @@ import subprocess
 import time
 
 '''
-TODO:增加板框绘制,绘制最小板框
+TODO:增加板框绘制,绘制最小板框 ✔
+
+10.7
+TODO:新对话让view在最下面 ✔
+TODO:开新窗口把旧窗口关闭，同时考虑历史是否清除 ✔    历史记录的事情再说
+TODO:启动布线前需要先把现有的线删除 ✔
+TODO:对话增加流式输出功能
+TODO:增加元件库查询，RAG或者其它
+
 TODO:查询函数中查询库名错误
+
+TODO:用户历史记录管理
+
+
+
 '''
 
 
@@ -34,6 +47,9 @@ def launch_freerouting():
     启动自动布线工具
     :return:
     """
+
+    remove_all_tracks()  # 先把已经有的线删除了
+    create_minimum_board_outline()
 
     def routing():
         current_script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -229,7 +245,7 @@ def create_board_outline(start_x_mil, start_y_mil, width_mil, height_mil, line_w
     wx.CallAfter(pcbnew.Refresh)
 
 
-def minimum_board_outline(line_width_mil=2):
+def create_minimum_board_outline(line_width_mil=2):
     """
     删除目前Edge.Cuts层上的图形，并创建一个最小板框
     :param line_width_mil:线宽，默认为2mil
@@ -269,12 +285,34 @@ def remove_board_outline():
         # pcbnew.Refresh()
 
         drawings_to_delete = [d for d in list(board.GetDrawings()) if d.GetLayer() == pcbnew.Edge_Cuts]
-        time.sleep(0.05) # 不加这个延时会闪退
+        # time.sleep(0.05)  # 不加这个延时会闪退 再注释：修改成RemoveNative就行了
 
         if drawings_to_delete:
             for d in drawings_to_delete:
                 # d.ClearSelected()
-                board.Remove(d)
+                board.RemoveNative(d)
+
+        wx.CallAfter(pcbnew.Refresh)
+
+    except Exception as e:
+        wx.MessageBox(f"发生异常: {str(e)}")
+
+
+def remove_all_tracks():
+    """
+    删除当前 PCB 板上的所有走线（包括 Tracks 和 Vias）
+    """
+    try:
+        board = pcbnew.GetBoard()
+        tracks = board.GetTracks()
+
+        # 必须先转为独立 Python list（彻底断开 SWIG 容器引用），不然remove会把board给销毁，导致无法获取board，要彻底重启kicad才行
+        tracks_to_delete = [d for d in list(tracks)]
+
+        if tracks_to_delete:
+            for d in tracks_to_delete:
+                # 再逐个删除
+                board.RemoveNative(d)
 
         wx.CallAfter(pcbnew.Refresh)
 

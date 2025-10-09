@@ -1,12 +1,13 @@
 # kicad_complex_framework/pcb_assistant_action.py
 
 import os
-
+import wx
 import pcbnew
-import wx  # KiCad 使用 wxPython 作为其 GUI 工具包
 
 # 从我们自己的工具模块中导入辅助函数
-from .import wx_gui
+from . import wx_gui
+
+_chat_window_instance = None
 
 
 class ComplexFrameworkAction(pcbnew.ActionPlugin):
@@ -24,16 +25,29 @@ class ComplexFrameworkAction(pcbnew.ActionPlugin):
 
     def Run(self):
         """
-        当用户点击工具栏按钮或菜单项时，此方法被调用.
-        这是插件在 KiCad 环境内的主要入口点.
+        当用户点击工具栏按钮或菜单项时，此方法被调用.这是插件在 KiCad 环境内的主要入口点.
         """
 
+        global _chat_window_instance
 
-        # app = wx.App()
+        # KiCad 已经在运行 wx 主循环，不需要再创建 wx.App()
+        app = wx.App.Get() or wx.App(False)
 
-        # 替换为您的DeepSeek API密钥
-        API_KEY = "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"
+        # 如果窗口存在且显示中，就直接激活它
+        if _chat_window_instance and _chat_window_instance.IsShownOnScreen():
+            _chat_window_instance.Raise()
+            _chat_window_instance.RequestUserAttention(wx.USER_ATTENTION_INFO)
+            return
 
-        frame = wx_gui.ChatWindow(API_KEY)
-        frame.Show()
-        # app.MainLoop()
+        # 否则新建窗口
+        API_KEY = "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"
+        _chat_window_instance = wx_gui.ChatWindow(API_KEY)
+
+        # 绑定关闭事件
+        def on_close(event):
+            global _chat_window_instance
+            _chat_window_instance = None
+            event.Skip()
+
+        _chat_window_instance.Bind(wx.EVT_CLOSE, on_close)
+        _chat_window_instance.Show()

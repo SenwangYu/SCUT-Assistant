@@ -25,9 +25,8 @@ AVAILABLE_ACTIONS = {
     "place_footprint": pcb_assistant_utils.place_footprint,
     "connect_pads_to_nets": pcb_assistant_utils.connect_pads_to_nets,
     "query_board_footprints": pcb_assistant_utils.query_board_footprints,
-    "create_board_outline": pcb_assistant_utils.create_board_outline,
     "put_next_to": pcb_assistant_utils.put_next_to,
-    "minimum_board_outline": pcb_assistant_utils.minimum_board_outline
+    "create_minimum_board_outline": pcb_assistant_utils.create_minimum_board_outline
 }
 
 
@@ -48,7 +47,7 @@ class DeepSeekWorker:
 
         try:
             response_stream = self.client.chat.completions.create(
-                model="deepseek/deepseek-chat-v3.1:free",
+                model="deepseek/deepseek-chat-v3.1",
                 messages=message,
                 stream=True
             )
@@ -412,7 +411,8 @@ class ChatWindow(wx.Frame):
         # pcb_assistant_utils.create_board_outline(1000, 1000, 1000, 1000)
         self.debug_print("test_bnt")
         # pcb_assistant_utils.test()
-        pcb_assistant_utils.minimum_board_outline()
+        pcb_assistant_utils.remove_all_tracks()
+        # pcb_assistant_utils.create_minimum_board_outline()
         # pcb_assistant_utils.record_of_courtyards()
         # pcb_assistant_utils.put_next_to("C4", "R2", 0, 10, 5, 500, True)
         # pcb_assistant_utils.put_next_to_v2("C4", "R2", 1)
@@ -495,17 +495,11 @@ class ChatWindow(wx.Frame):
 
     def scroll_to_bottom(self):
         """将滚动条移动到底部"""
+        js_scroll = """
+        window.scrollTo(0, document.body.scrollHeight);
+        """
+        wx.CallLater(500, self.chat_display.RunScript, js_scroll)  # 这里加了个延时，要在确保setPage完成之后再滚动，不然会出错
 
-        def _do_scroll(self):
-            if self.chat_display:
-                # 获取垂直滚动范围
-                scroll_range = self.chat_display.GetScrollRange(wx.VERTICAL)
-                # 设置滚动位置到底部
-                self.chat_display.Scroll(0, scroll_range)
-                # 强制刷新显示
-                self.chat_display.Refresh()
-
-        wx.CallAfter(_do_scroll, self)
 
 # if __name__ == "__main__":
 # app = wx.App()

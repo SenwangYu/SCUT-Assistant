@@ -56,27 +56,20 @@ SYSTEM_PROMPT = [
 "pads总数": len(pad_list),
 "pads": pad_list
 
-6.create_board_outline(start_x_mm, start_y_mm, width_mm, height_mm, line_width_mm=0.1):
-在 Edge.Cuts 层创建矩形板框
-:param start_x_mm: 左上角 X 坐标（mm）
-:param start_y_mm: 左上角 Y 坐标（mm）
-:param width_mm: 板子宽度（mm）
-:param height_mm: 板子高度（mm）
-:param line_width_mm: 线宽（mm）
 
-7.minimum_board_outline(line_width_mil=2):
-创建一个适合的板框，板子不为空时使用。会根据元件的外围边界自动生成一个紧凑的矩形板框。
+6.create_minimum_board_outline(line_width_mil=2):
+创建一个适合的板框，会根据元件的外围边界自动生成一个紧凑的矩形板框。
 :param line_width_mil:线宽，默认为2mil
 :return:bool
     
 
-8.put_next_to(ref_mobile, ref_stationary, direction, clearance=10):
+7.put_next_to(ref_mobile, ref_stationary, direction, clearance=10):
 将位号为mobile_ref的封装移动到位号为stationary_ref的封装的旁边，可以是上下左右，用direction表示
 :param clearance: 安全间距，默认10mil
 :param ref_mobile: 要移动的封装位号
 :param ref_stationary: 锚定的封装位号
 :param direction:要移动到的位置(0=上, 1=下, 2=左, 3=右)
-:return:True
+:return:True表示移动成功，False表示移动失败，因为没有合适的位置了
         
 
                 
