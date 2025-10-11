@@ -19,6 +19,10 @@ from . import system_prompt
 # import pcb_assistant_utils
 # import system_prompt
 
+
+
+
+
 AVAILABLE_ACTIONS = {
     "move_footprint": pcb_assistant_utils.move_footprint,
     "launch_freerouting": pcb_assistant_utils.launch_freerouting,
@@ -91,66 +95,6 @@ class DeepSeekWorker:
             wx.CallAfter(self.window.update_response, error_msg)
         finally:
             wx.CallAfter(self.window.on_request_finished)
-
-    # def parse_and_execute_actions(self, response_content):
-    #     """解析JSON结构并执行操作"""
-    #     # wx.CallAfter(self.window.append_message, "system", "执行器", "开始解析操作指令...")
-    #     ChatWindow.debug_print(self.window, response_content)
-    #     try:
-    #         # 提取可能的JSON结构
-    #         # json_match = re.search(r'(\{(?:[^{}]|(?:\{(?:[^{}]|(?:\{[^{}]*\}))*\}))*\})', response_content)
-    #         # if not json_match:
-    #         #     raise ValueError("未找到有效JSON结构")
-    #
-    #         start = response_content.find('{')
-    #         end = response_content.rfind('}')
-    #         if start == -1 or end == -1 or end < start:
-    #             raise ValueError("未找到有效JSON结构")
-    #         json_str = response_content[start:end + 1]
-    #
-    #         # ChatWindow.debug_print(self.window, json_match)
-    #
-    #         # json_str = json_match.group(0)
-    #         ChatWindow.debug_print(self.window, json_str)
-    #         action_plan = json.loads(json_str)
-    #
-    #         ChatWindow.debug_print(self.window, action_plan)
-    #
-    #         explanation = action_plan.get("explanation", "")
-    #         actions = action_plan.get("actions", [])
-    #
-    #         ChatWindow.debug_print(self.window, explanation)
-    #         ChatWindow.debug_print(self.window, actions)
-    #         wx.CallAfter(self.window.append_message, "assistant", "SCUT助手", explanation)
-    #
-    #         # 执行每个动作
-    #         for i, action in enumerate(actions):
-    #             func_name = action.get("function")
-    #             params = action.get("parameters", {})
-    #
-    #             # 分离长字符串的构建
-    #             params_str = ', '.join(f"{k}={v}" for k, v in params.items())
-    #             message = f"准备执行: {func_name}({params_str})"
-    #             wx.CallAfter(self.window.append_message, "system", "执行", message)
-    #
-    #             # 修复缩进问题
-    #             if func_name in AVAILABLE_ACTIONS:
-    #                 try:
-    #                     result = AVAILABLE_ACTIONS[func_name](**params)
-    #                     wx.CallAfter(self.window.append_message, "system", "结果",
-    #                                  f"操作成功: {func_name} 返回 {result}")
-    #                 except Exception as e:
-    #                     wx.CallAfter(self.window.append_message, "system", "错误",
-    #                                  f"执行失败: {str(e)}")
-    #             else:
-    #                 wx.CallAfter(self.window.append_message, "system", "警告",
-    #                              f"未知操作: {func_name}")
-    #
-    #         return True
-    #     except Exception as e:
-    #         wx.CallAfter(self.window.append_message, "system", "错误",
-    #                      f"解析错误: {str(e)}")
-    #         return False
 
     def parse_and_execute_actions(self, response_content):
         """解析JSON结构并执行操作"""
@@ -374,6 +318,11 @@ class ChatWindow(wx.Frame):
 
     def send_message(self, event):
         """用户发送消息"""
+        # 检测发送按钮是否disable
+        if not self.send_btn.IsEnabled():
+            # 你可以在这里加一个调试打印，以便在发生这种情况时知道
+            self.debug_print("发送已被禁用", "WARNING")
+            return
 
         message = self.message_input.GetValue().strip()
         if not message:
@@ -417,36 +366,6 @@ class ChatWindow(wx.Frame):
         # pcb_assistant_utils.put_next_to("C4", "R2", 0, 10, 5, 500, True)
         # pcb_assistant_utils.put_next_to_v2("C4", "R2", 1)
         # pcb_assistant_utils.move_footprint("CV", 0, 0)
-        # pcb_assistant_utils.place_footprint("Inductor_SMD", "L_01005_0402Metric", 0,
-        #                                     0, "L1", "10µF",
-        #                                     {"1": "SW", "2": "VOUT"},
-        #                                     0
-        #                                     )
-        # pcb_assistant_utils.get_courtyard_by_ref("L2")
-        # pcb_assistant_utils.get_courtyard()
-        # wx.CallAfter(pcb_assistant_utils.create_board_outline, 50, 50, 100, 100)
-        # pcb_assistant_utils.connect_pads_to_nets("LED1", {'1': 'PPP', '2': 'BBB'})
-        # wx.MessageBox("BBB")
-        # pcb_assistant_utils.connect_pads_to_nets("R22", {"1": "VCC", "2": "GND"})
-        # pcb_assistant_utils.test()
-        # pcb_assistant_utils.place_footprint("Display", "AG12864E", 100, 200, rotation_deg=0)
-        # wx.MessageBox(pcb_assistant_utils.get_board_statistics())
-        # print(1)
-        # 先将工程文件导出为dsn,用freerouting打开后存为ses再加载
-
-        # freerouting_path = "D:/Kicad/9.0/share/kicad/scripting/plugins/kicad_complex_framework/freerouting/freerouting-2.1.0.jar"
-        # board = pcbnew.GetBoard()
-        # board_path = board.GetFileName()
-        # base_name = os.path.splitext(board_path)[0]
-        # dsn_file = base_name + ".dsn"
-        # ses_file = base_name + ".ses"
-        # pcbnew.ExportSpecctraDSN(board, dsn_file)
-        # command = ["java", "-jar", freerouting_path, "-de", dsn_file, "-do", ses_file]
-        # subprocess.run(command, check=True)
-        # pcbnew.ImportSpecctraSES(board, ses_file)
-        # pcbnew.Refresh()
-        # pcb_assistant_utils.move_footprint_by_ref("C1", 500, 500)
-        # pcb_assistant_utils.get_board_statistics()
 
     def on_close(self, event):
         """窗口关闭时确保停止所有线程"""
@@ -499,14 +418,3 @@ class ChatWindow(wx.Frame):
         window.scrollTo(0, document.body.scrollHeight);
         """
         wx.CallLater(500, self.chat_display.RunScript, js_scroll)  # 这里加了个延时，要在确保setPage完成之后再滚动，不然会出错
-
-
-# if __name__ == "__main__":
-# app = wx.App()
-#
-# # 替换 API密钥
-# API_KEY = "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"
-#
-# frame = ChatWindow(API_KEY)
-# frame.Show()
-# app.MainLoop()
