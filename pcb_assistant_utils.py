@@ -426,12 +426,12 @@ def mm2mil(mm_value):
     return mil_value
 
 
-def put_next_to(ref_mobile, ref_stationary, direction, clearance=10, step=5, max_shift=500, mode=False):
+def put_next_to(ref_mobile, ref_stationary, direction, clearance=10, step=5, max_shift=1500, mode=True):
     """
     将位号为mobile_ref的封装移动到位号为stationary_ref的封装的旁边，可以是上下左右，用direction表示
-    :param mode: 碰撞检测模式，mode==False表示courtyard模式（默认模式），mode==True表示boundingBox模式（会检测丝印和文本等的重叠）
+    :param mode: 布局模式，mode==False表示紧凑模式，mode==True表示正常模式（默认）。用户要求布局紧凑的时候用紧凑模式
     :param step: 如过目标位置有碰撞发生，迭代平移直到不碰撞的步长
-    :param max_shift: 迭代平移的最大偏移量，默认
+    :param max_shift: 迭代平移的最大偏移量，默认1500mil
     :param clearance: 安全间距，默认10mil
     :param ref_mobile: 要移动的封装位号
     :param ref_stationary: 锚定的封装位号

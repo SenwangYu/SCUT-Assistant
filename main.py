@@ -18,7 +18,7 @@ def run_standalone():
 
     # 替换为您的DeepSeek API密钥
     # API_KEY = "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"  # 0528
-    API_KEY = "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"  # v3.1
+    API_KEY = "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"  # v3.1
 
     frame = wx_gui.ChatWindow(API_KEY)
     frame.Show()

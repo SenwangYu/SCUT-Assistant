@@ -6,6 +6,7 @@ import sys
 import os
 import time
 import json
+import html
 import re
 import threading
 from openai import OpenAI
@@ -18,10 +19,6 @@ from . import system_prompt
 
 # import pcb_assistant_utils
 # import system_prompt
-
-
-
-
 
 AVAILABLE_ACTIONS = {
     "move_footprint": pcb_assistant_utils.move_footprint,
@@ -43,11 +40,16 @@ class DeepSeekWorker:
 
     def run_query(self, message):
         """修改后的处理流式请求的线程函数"""
-        # 更新UI显示助手消息头
-        # wx.CallAfter(self.window.append_message, "assistant", "DeepSeek 助手", "")
-        ChatWindow.debug_print(self.window, "进入run_query")
+        self.window.log_debug("进入run_query")
         full_response = []
-        json_detected = False  # 检测JSON结构标志位
+        json_started = False
+        self._is_running = True
+        assistant_message_head_added = False
+
+        # 批量处理缓存
+        chunk_buffer = []
+        last_update_time = time.time()
+        update_interval = 0.2  # 每0.2秒更新一次UI
 
         try:
             response_stream = self.client.chat.completions.create(
@@ -57,24 +59,59 @@ class DeepSeekWorker:
             )
 
             for chunk in response_stream:
-                if not self._is_running:  # 用户取消请求
+                if not self._is_running:
+                    self.window.log_debug("用户取消请求")
                     break
 
-                if chunk.choices[0].delta.content:
-                    text_chunk = chunk.choices[0].delta.content
+                text_chunk = chunk.choices[0].delta.content
+                if text_chunk:
                     full_response.append(text_chunk)
 
-                    # 尝试检测JSON结构的开始
-                    if not json_detected and any(brace in text_chunk for brace in ['{', '}']):
-                        json_detected = True
+                    if not json_started:
+                        if '§' in text_chunk:
+                            json_started = True
+                            before_json_part, _, _ = text_chunk.partition('§')
+                            if before_json_part:
+                                chunk_buffer.append(before_json_part)
 
-                    if json_detected:
-                        # JSON模式下只收集文本，不更新UI
-                        continue
-                    # else:
-                    # 非JSON模式下实时更新
-                    # wx.CallAfter(self.window.update_response, text_chunk)
-                    # time.sleep(0.05)  # 模拟真实打字效果
+                            # 立即输出缓存的内容
+                            if chunk_buffer:
+                                batched_text = ''.join(chunk_buffer)
+                                wx.CallAfter(self.window.update_response, batched_text)
+                                chunk_buffer.clear()
+
+                            self.window.log_debug("检测到 '§', 停止流式输出到UI")
+                            # 启动等待动画
+                            wx.CallAfter(self.window.start_planning_animation)
+
+                        else:
+                            # 添加助手消息头（只添加一次）
+                            if not assistant_message_head_added:
+                                wx.CallAfter(self.window.append_message, "assistant", "SCUT助手", "")
+                                assistant_message_head_added = True
+
+                            # 缓存chunk
+                            chunk_buffer.append(text_chunk)
+
+                            # 定时批量更新UI
+                            current_time = time.time()
+                            if current_time - last_update_time >= update_interval:
+                                if chunk_buffer:
+                                    batched_text = ''.join(chunk_buffer)
+                                    wx.CallAfter(self.window.update_response, batched_text)
+                                    chunk_buffer.clear()
+                                    last_update_time = current_time
+
+            # 输出剩余的chunk
+            if chunk_buffer and not json_started:
+                batched_text = ''.join(chunk_buffer)
+                wx.CallAfter(self.window.update_response, batched_text)
+                chunk_buffer.clear()
+
+            # 用户取消请求就退出
+            if not self._is_running:
+                wx.CallAfter(self.window.on_request_finished)
+                return
 
             # 拼接完整响应
             full_response_str = ''.join(full_response)
@@ -82,52 +119,37 @@ class DeepSeekWorker:
             # 保存到历史记录
             self.window.conversation_history.append({"role": "assistant", "content": full_response_str})
 
-            ChatWindow.debug_print(self.window, self.window.conversation_history)
-
             # 尝试解析并执行操作
-            if not self.parse_and_execute_actions(full_response_str):
-                # 如果解析失败，直接显示原始内容
-                wx.CallAfter(self.window.append_message, "assistant",
-                             "SCUT助手", full_response_str)
+            json_match = self.extract_json(full_response_str)
+            actions = []
+            if json_match is not None:
+                actions = json_match.get("actions", [])
+            if not actions:  # 没有动作需要执行
+                # 停止动画,没有动作就延迟停止动画，让动画播放完整
+                wx.CallLater(1000, self.window.stop_planning_animation)
+                wx.CallAfter(self.window.on_request_finished)
+                return
+            else:
+                self.execute_actions(actions)
 
         except Exception as e:
+            # 停止动画
+            wx.CallAfter(self.window.stop_planning_animation)
             error_msg = f"\n\n【错误】: {str(e)}"
+            self.window.log_debug(f"请求异常: {str(e)}", level="ERROR")
             wx.CallAfter(self.window.update_response, error_msg)
-        finally:
             wx.CallAfter(self.window.on_request_finished)
 
-    def parse_and_execute_actions(self, response_content):
+    def execute_actions(self, actions):
         """解析JSON结构并执行操作"""
-        # ChatWindow.debug_print(self.window, response_content)
-        ChatWindow.debug_print(self.window, "进入parse_and_execute_actions")
+        # 动画停止
+        wx.CallAfter(self.window.stop_planning_animation)
         try:
-            # 提取可能的JSON结构
-            ChatWindow.debug_print(self.window, "开始提取JSON")
-
-            # json_match = re.search(r'(\{(?:[^{}]|(?:\{(?:[^{}]|(?:\{[^{}]*\}))*\}))*\})', response_content)
-            json_match = self.extract_json(response_content)
-            if not json_match:
-                ChatWindow.debug_print(self.window, "未找到有效JSON结构")
-                raise ValueError("未找到有效JSON结构")
-            # extract_json() 返回的是一个 Python 字典,所以不用group也不用loads了
-            # json_str = json_match.group(0)
-            # action_plan = json.loads(json_str)
-            action_plan = json_match
-            explanation = action_plan.get("explanation", "")
-            actions = action_plan.get("actions", [])
-
-            # ChatWindow.debug_print(self.window, "json_str:\n" + json_str)
-            ChatWindow.debug_print(self.window, action_plan)
-            ChatWindow.debug_print(self.window, explanation)
-            ChatWindow.debug_print(self.window, actions)
-
-            wx.CallAfter(self.window.append_message, "assistant", "SCUT助手", explanation)
-
             action_feedback = []
 
             # 执行动作
-            for action in actions:
-                ChatWindow.debug_print(self.window, "执行动作一次")
+            for idx, action in enumerate(actions):
+                self.window.log_debug(f"执行第 {idx + 1} 个动作")
                 func_name = action.get("function")
                 params = action.get("parameters", {})
 
@@ -135,44 +157,44 @@ class DeepSeekWorker:
                     try:
                         result = AVAILABLE_ACTIONS[func_name](**params)
                         feedback = f"{func_name} 执行成功，返回: {result}"
+                        self.window.log_debug(feedback)
                     except Exception as e:
                         feedback = f"{func_name} 执行失败: {str(e)}"
+                        self.window.log_debug(feedback, level="ERROR")
                 else:
                     feedback = f"未知操作: {func_name}"
+                    self.window.log_debug(feedback, level="WARNING")
 
                 wx.CallAfter(self.window.append_message, "system", "执行反馈", feedback)
                 action_feedback.append(feedback)
 
-            # === 核心改动：动作执行完后，继续交给大模型 ===
+            # 核心改动：将后续请求的启动延迟到主线程
             if action_feedback:
                 feedback_text = json.dumps(
                     {"上次动作已执行完毕,执行结果如下，请不要重复执行上面已经执行过的动作": action_feedback},
                     ensure_ascii=False
                 )
-                # 把动作结果交给大模型，让它决定下一步
-                wx.CallAfter(self.window.conversation_history.append,
-                             {"role": "user", "content": feedback_text})
-
-                wx.CallAfter(self.run_query, self.window.conversation_history)
-                ChatWindow.debug_print(self.window, "反馈完成一次")
-
-            return True
+                # 先结束当前请求
+                wx.CallAfter(self.window.on_request_finished)
+                # 延迟100ms后在主线程中启动新请求
+                wx.CallLater(100, self.window.start_follow_up_request, feedback_text)
+            else:
+                wx.CallAfter(self.window.on_request_finished)
 
         except Exception as e:
-            wx.CallAfter(self.window.append_message, "system", "错误", f"解析错误: {str(e)}")
-            return False
-
-    import json
+            error_msg = f"解析错误: {str(e)}"
+            self.window.log_debug(error_msg, level="ERROR")
+            wx.CallAfter(self.window.append_message, "system", "错误", error_msg)
+            wx.CallAfter(self.window.on_request_finished)
 
     def extract_json(self, response_content: str):
         """
-        用GPT写的提取JSON的函数
         从 response_content 中提取第一个完整 JSON 对象并返回 Python 字典
         如果无法找到或解析，返回 None
         """
         start = response_content.find("{")
         if start == -1:
-            return None  # 没有左大括号，直接返回
+            return None
 
         count = 0
         in_string = False
@@ -200,13 +222,15 @@ class DeepSeekWorker:
                         json_str = ''.join(candidate)
                         try:
                             return json.loads(json_str)
-                        except json.JSONDecodeError:
+                        except json.JSONDecodeError as e:
+                            self.window.log_debug(f"JSON解析失败: {str(e)}", level="ERROR")
                             return None
 
-        return None  # 没有匹配成功
+        return None
 
     def cancel(self):
         """取消当前请求"""
+        self.window.log_debug("取消请求被调用")
         self._is_running = False
 
 
@@ -218,9 +242,18 @@ class ChatWindow(wx.Frame):
         self.worker_thread = None
         self.conversation_history = system_prompt.SYSTEM_PROMPT
         self.chat_html = "<html><head><style>body { font-family: Arial; background-color: #f0f0f0; }</style></head><body></body></html>"
+
+        # 请求状态标志
+        self.is_requesting = False
+
+        # 等待动画标记
+        self.planning_timer = None  # 添加定时器
+        self.planning_dots = 0  # 用于动画的点数计数
+
+        # 初始消息发送标记
+        self.flag_initial_message_sent = False
+
         self.init_ui()
-        # 初始消息
-        self.append_message("assistant", "SCUT助手", "您好！我是来自SCUT的PCB助手。请问有什么可以帮您？")
 
     def init_ui(self):
         panel = wx.Panel(self)
@@ -228,7 +261,7 @@ class ChatWindow(wx.Frame):
 
         # 创建HTML窗口用于富文本显示
         self.chat_display = wx.html2.WebView.New(panel)
-        self.chat_display.SetPage(self.chat_html, "")  # 初始化带样式的内容
+        self.chat_display.SetPage(self.chat_html, "")
 
         # 输入区域
         self.message_input = wx.TextCtrl(panel, style=wx.TE_PROCESS_ENTER)
@@ -239,35 +272,35 @@ class ChatWindow(wx.Frame):
         self.send_btn = wx.Button(panel, label="发送")
         self.stop_btn = wx.Button(panel, label="停止响应")
         self.test_btn = wx.Button(panel, label="test")
-        self.debug_btn = wx.Button(panel, label="调试")  # 新增调试按钮
+        self.debug_btn = wx.Button(panel, label="调试")
         self.stop_btn.Disable()
 
         btn_sizer.Add(self.send_btn, 1, wx.EXPAND)
         btn_sizer.Add(self.stop_btn, 1, wx.EXPAND)
         btn_sizer.Add(self.test_btn, 1, wx.EXPAND)
-        btn_sizer.Add(self.debug_btn, 1, wx.EXPAND)  # 添加调试按钮到布局
+        btn_sizer.Add(self.debug_btn, 1, wx.EXPAND)
 
-        # 加一个Debug窗口
+        # Debug窗口
         debug_sizer = wx.StaticBoxSizer(wx.VERTICAL, panel, "Debug Window")
         self.debug_text = wx.TextCtrl(panel, style=wx.TE_MULTILINE | wx.TE_READONLY | wx.HSCROLL)
-        self.debug_text.SetMinSize((-1, 150))  # 设置最小高度150像素
+        self.debug_text.SetMinSize((-1, 150))
         debug_sizer.Add(self.debug_text, 1, wx.EXPAND | wx.ALL, 5)
-        vbox.Add(debug_sizer, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 5)
 
         # 布局
         vbox.Add(self.chat_display, 1, wx.EXPAND | wx.ALL, 5)
         vbox.Add(self.message_input, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 5)
         vbox.Add(btn_sizer, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 5)
+        vbox.Add(debug_sizer, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 5)
         panel.SetSizer(vbox)
 
         # 事件绑定
         self.send_btn.Bind(wx.EVT_BUTTON, self.send_message)
         self.stop_btn.Bind(wx.EVT_BUTTON, self.cancel_request)
         self.test_btn.Bind(wx.EVT_BUTTON, self.on_test)
-        # self.debug_btn.Bind(wx.EVT_BUTTON, self.toggle_debug) # 绑定调试按钮事件
         self.message_input.Bind(wx.EVT_TEXT_ENTER, self.send_message)
 
         self.Bind(wx.EVT_CLOSE, self.on_close)
+        self.Bind(wx.html2.EVT_WEBVIEW_LOADED, self.on_webview_loaded, self.chat_display)
 
     def append_message(self, role, name, message):
         """添加消息到对话框"""
@@ -276,121 +309,158 @@ class ChatWindow(wx.Frame):
         elif role == "assistant":
             color = "#009933"
         elif role == "system":
-            color = "#ff6600"  # 橙色用于系统消息
-        elif role == "execution":
-            color = "#9933cc"  # 紫色用于执行消息
+            color = "#ff6600"
         else:
             color = "#666666"
 
         timestamp = time.strftime("%H:%M:%S")
-        html_content = f"""
-        <div style='margin:10px 0;'>
-            <span style='font-weight:bold;color:{color}'>{name}</span>
-            <span style='color:#999;font-size:0.8em'>({timestamp})</span>
-            <div style='margin-top:5px;'>{message}</div>
-        </div>
+        escaped_message = html.escape(message).replace('\n', '<br>')
+
+        html_message_block = f"""
+            <div class='message-block' style='margin:10px 0;'>
+                <div>
+                    <span style='font-weight:bold;color:{color}'>{name}</span>
+                    <span style='color:#999;font-size:0.8em'> ({timestamp})</span>
+                </div>
+                <div class='message-content' style='margin-top:5px;'>{escaped_message}</div>
+            </div>
         """
 
-        # 直接更新HTML字符串
-        self.chat_html = self.chat_html.replace("</body>", f"{html_content}</body>")
-        self.chat_display.SetPage(self.chat_html, "")
-        self.scroll_to_bottom()
+        html_json = json.dumps(html_message_block)
+        js_inject = f"""
+            document.body.insertAdjacentHTML('beforeend', {html_json});
+            window.scrollTo(0, document.body.scrollHeight);
+        """
+        self.chat_display.RunScript(js_inject)
 
         # 保存到历史记录
         if role == "user":
             self.conversation_history.append({"role": "user", "content": message})
-        # elif role == "assistant":
-        #     self.conversation_history.append({"role": "assistant", "content": message})
 
     def update_response(self, text_chunk):
         """实时更新流式响应"""
-        # 用正则处理粗体样式
-        formatted_chunk = text_chunk.replace("\n", "<br>").replace('"', '\\"')
+        chunk_for_js = json.dumps(text_chunk.replace("\n", "<br>"))
 
-        # 使用JavaScript追加内容到最后一个消息框
-        js = f"""
-        var lastDiv = document.body.lastElementChild;
-        var contentDiv = lastDiv.querySelector('div');
-        contentDiv.innerHTML += "{formatted_chunk}";
-        window.scrollTo(0, document.body.scrollHeight);
+        js_update = f"""
+            try {{
+                var contentDiv = document.querySelector('.message-block:last-child .message-content');
+                if (contentDiv) {{
+                    contentDiv.insertAdjacentHTML('beforeend', {chunk_for_js});
+                    window.scrollTo(0, document.body.scrollHeight);
+                }}
+            }} catch(e) {{
+                console.error('Error updating response:', e);
+            }}
         """
-        self.chat_display.RunScript(js)
+        self.chat_display.RunScript(js_update)
 
     def send_message(self, event):
         """用户发送消息"""
-        # 检测发送按钮是否disable
-        if not self.send_btn.IsEnabled():
-            # 你可以在这里加一个调试打印，以便在发生这种情况时知道
-            self.debug_print("发送已被禁用", "WARNING")
-            return
-
         message = self.message_input.GetValue().strip()
         if not message:
+            return
+
+        # 如果正在处理请求，忽略
+        if self.is_requesting:
+            self.log_debug("已有请求正在处理中", level="WARNING")
             return
 
         self.append_message("user", "用户", message)
         self.message_input.Clear()
 
-        # 禁用发送按钮直到完成
+        # 启动新请求
+        self._start_request()
+
+    def start_follow_up_request(self, feedback_text):
+        """
+        启动后续请求（在主线程中调用）
+        """
+        self.log_debug("准备启动后续请求")
+
+        # 检查是否正在处理请求
+        if self.is_requesting:
+            self.log_debug("已有请求正在处理中，等待...", level="WARNING")
+            # 延迟重试
+            wx.CallLater(200, self.start_follow_up_request, feedback_text)
+            return
+
+        # 添加反馈到历史记录
+        self.conversation_history.append({"role": "user", "content": feedback_text})
+
+        # 启动新请求
+        self._start_request()
+
+    def _start_request(self):
+        """
+        内部方法：启动新请求
+        必须在主线程中调用
+        """
+        # 设置请求状态
+        self.is_requesting = True
+
+        # 禁用发送按钮
         self.send_btn.Disable()
         self.stop_btn.Enable()
 
-        # 启动工作线程
+        # 启动新的工作线程
         self.worker = DeepSeekWorker(self.api_key, self)
-        self.worker_thread = threading.Thread(target=self.worker.run_query, args=(self.conversation_history,))
+        self.worker_thread = threading.Thread(
+            target=self.worker.run_query,
+            args=(self.conversation_history,)
+        )
         self.worker_thread.daemon = True
         self.worker_thread.start()
+        self.log_debug("新请求线程已启动")
 
     def cancel_request(self, event):
         """取消当前响应"""
         if self.worker:
             self.worker.cancel()
             self.append_message("system", "系统", "【响应已取消】")
-            self.on_request_finished()
 
     def on_request_finished(self):
-        """请求完成后的清理工作"""
+        """请求完成清理"""
+        self.log_debug("请求完成，清理资源")
         self.send_btn.Enable()
         self.stop_btn.Disable()
+        self.is_requesting = False
         self.worker = None
         self.worker_thread = None
 
     def on_test(self, event):
-        # pcb_assistant_utils.test222()
-        # pcb_assistant_utils.create_board_outline(1000, 1000, 1000, 1000)
-        self.debug_print("test_bnt")
-        # pcb_assistant_utils.test()
+        self.log_debug("test_btn 被点击")
         pcb_assistant_utils.remove_all_tracks()
-        # pcb_assistant_utils.create_minimum_board_outline()
-        # pcb_assistant_utils.record_of_courtyards()
-        # pcb_assistant_utils.put_next_to("C4", "R2", 0, 10, 5, 500, True)
-        # pcb_assistant_utils.put_next_to_v2("C4", "R2", 1)
-        # pcb_assistant_utils.move_footprint("CV", 0, 0)
+
+    def on_webview_loaded(self, event):
+        """WebView加载完成后的初始化"""
+        self.log_debug("WebView 已加载完成。")
+
+        if not self.flag_initial_message_sent:
+            self.append_message("assistant", "SCUT助手", "您好！我是来自SCUT的PCB助手。请问有什么可以帮您？")
+            self.flag_initial_message_sent = True
 
     def on_close(self, event):
         """窗口关闭时确保停止所有线程"""
+        self.log_debug("窗口正在关闭，停止所有线程")
+
         if self.worker:
             self.worker.cancel()
-            if self.worker_thread and self.worker_thread.is_alive():
-                self.worker_thread.join(timeout=1.0)
+
+        if self.worker_thread and self.worker_thread.is_alive():
+            self.worker_thread.join(timeout=2.0)
+
         self.Destroy()
 
-    def debug_print(self, message, level="INFO"):
+    def log_debug(self, message, level="INFO"):
         """
         在调试窗口打印信息
-
-        参数:
-            message (str): 要显示的调试信息
-            level (str): 信息级别，可选值: "INFO", "WARNING", "ERROR", "DEBUG"
+        可以安全地在任何线程中调用
         """
-        # 如果调试窗口尚未初始化直接返回（避免异常）
         if not hasattr(self, 'debug_text'):
             return
 
-        # 获取当前时间（精确到毫秒）
         timestamp = time.strftime("%H:%M:%S")
 
-        # 为不同级别添加前缀
         level_prefixes = {
             "INFO": "[INFO]",
             "DEBUG": "[DEBUG]",
@@ -399,22 +469,63 @@ class ChatWindow(wx.Frame):
         }
 
         prefix = level_prefixes.get(level, "[UNKNOWN]")
-
-        # 格式化输出
         formatted_msg = f"[{timestamp}] {prefix} {message}\n"
 
-        # 向调试窗口添加信息（纯文本）
-        self.debug_text.AppendText(formatted_msg)
+        # 直接在当前线程追加（wxPython的TextCtrl是线程安全的）
+        try:
+            self.debug_text.AppendText(formatted_msg)
+            self.debug_text.ShowPosition(self.debug_text.GetLastPosition())
+        except:
+            pass  # 如果失败就忽略
 
-        # 滚动到最新内容
-        self.debug_text.ShowPosition(self.debug_text.GetLastPosition())
+    def start_planning_animation(self):
+        """启动规划动作的动画"""
+        self.planning_dots = 0
+        # 先显示初始状态
+        self.update_planning_animation()
+        # 启动定时器，每500ms更新一次
+        self.planning_timer = wx.Timer(self)
+        self.Bind(wx.EVT_TIMER, self.on_planning_timer, self.planning_timer)
+        self.planning_timer.Start(500)
 
-        # 立即刷新UI（如果需要在长任务中实时显示）
-        wx.YieldIfNeeded()
+    def on_planning_timer(self, event):
+        """定时器回调，更新动画"""
+        self.planning_dots = (self.planning_dots + 1) % 6  # 0,1,2,3循环
+        self.update_planning_animation()
 
-    def scroll_to_bottom(self):
-        """将滚动条移动到底部"""
-        js_scroll = """
-        window.scrollTo(0, document.body.scrollHeight);
+    def update_planning_animation(self):
+        """更新规划动作的显示"""
+        dots = "." * self.planning_dots
+        text = f"思考中{dots}"
+
+        # 注入HTML，居中显示，大字体，好看的颜色
+        html_content = f"""
+            <div id='planning-animation' style='text-align:left; margin:15px 0; font-size:1em; color:#6B4FBB; font-weight:bold;'>
+                {text}
+            </div>
         """
-        wx.CallLater(500, self.chat_display.RunScript, js_scroll)  # 这里加了个延时，要在确保setPage完成之后再滚动，不然会出错
+
+        js_code = f"""
+            var existing = document.getElementById('planning-animation');
+            if (existing) {{
+                existing.remove();
+            }}
+            document.body.insertAdjacentHTML('beforeend', {json.dumps(html_content)});
+            window.scrollTo(0, document.body.scrollHeight);
+        """
+        self.chat_display.RunScript(js_code)
+
+    def stop_planning_animation(self):
+        """停止并移除规划动画"""
+        if self.planning_timer:
+            self.planning_timer.Stop()
+            self.planning_timer = None
+
+        # 移除动画元素
+        js_code = """
+            var existing = document.getElementById('planning-animation');
+            if (existing) {
+                existing.remove();
+            }
+        """
+        self.chat_display.RunScript(js_code)
