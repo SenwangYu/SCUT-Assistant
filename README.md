@@ -7,7 +7,15 @@
 
 一个强大的、基于大语言模型（LLM）的PCB设计智能体，专为KiCad打造。它允许您通过自然语言对话，将复杂的设计意图直接转化为电路板上的精确操作，旨在成为工程师最高效的“执行副驾”，从而颠覆传统PCB设计工作流。
 
-演示视频：
+
+
+
+https://github.com/user-attachments/assets/970583ca-2593-4bec-9242-62de65389092
+
+
+
+
+bilibili链接：
 【融合大模型技术的PCB设计全流程智能化研究及系统】
 
 https://www.bilibili.com/video/BV1g3sWz8EaE/?share_source=copy_web&vd_source=a6e3d4b433776bef9c7ee12e0ff1f030
@@ -30,7 +38,6 @@ https://www.bilibili.com/video/BV1g3sWz8EaE/?share_source=copy_web&vd_source=a6e
 *   **闭环自我纠错**: 内置“执行-观察-反思”循环，能自动发现并修正执行过程中的错误（如API调用失败），极大降低人工干愈。
 *   **外部工具集成**: 成功集成了外部`freerouting.jar`，实现了全自动布线的一键启动。
 *   **实时流式反馈**: AI的思考与执行过程以流式文本实时展现，杜绝未知等待，整个交互过程高度透明、可追溯。
-*   **非阻塞式UI**: 采用多线程异步架构，即使在执行自动布线等耗时任务时，界面也保持100%流畅响应。
 *   **易于扩展的工具集**: 所有PCB操作均被封装为原子化的工具函数（见`pcb_assistant_utils.py`），可以轻松地为智能体添加新的设计能力。
 
 ## 架构设计
